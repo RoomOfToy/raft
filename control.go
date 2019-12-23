@@ -85,20 +85,23 @@ func (c *Controller) run() {
 		}
 		if !c.paused && evt != nil {
 			e := evt.(event)
-			c.debugLog.Debug("event", zap.Int("from", c.addr), zap.String("name", e.name), zap.Any("args", e.args))
 			switch e.name {
 			case "HandleMessage":
 				if e.args != nil {
+					c.debugLog.Info("Event: HandleMessage", zap.Int("from", e.args.(Message).Source()), zap.Int("to", e.args.(Message).Dest()))
 					c.machine.HandleMessage(e.args.(Message))
 				}
 			case "HandleLeaderTimeout":
+				c.debugLog.Info("Event: HandleLeaderTimeout", zap.Int("server", c.addr))
 				c.machine.HandleLeaderTimeout()
 			case "HandleElectionTimeout":
+				c.debugLog.Info("Event: HandleElectionTimout", zap.Int("server", c.addr))
 				c.machine.HandleElectionTimout()
 			case "AppendNewEntry":
+				c.debugLog.Info("Event: AppendNewEntry", zap.Int("server", c.addr))
 				c.machine.AppendNewEntry(e.args.(LogEntry))
 			default:
-				c.debugLog.Panic("Unsupported Event", zap.String("name", e.name))
+				c.debugLog.Panic("Event: Unsupported Event", zap.String("name", e.name))
 			}
 		}
 	}
@@ -153,8 +156,9 @@ func (c *Controller) runElectionTimer() {
 
 func (c *Controller) newElectionDeadline() {
 	newDeadline := time.Now().Add(time.Duration(rand.Int63n(10)) * ELECTION_TIMEOUT_SPREAD).Add(ELECTION_TIMEOUT)
-	// c.debugLog.Info("new election timeout", zap.Duration("diff", newDeadline.Sub(c.electionDeadline)))
-	if newDeadline.After(c.electionDeadline) {
+	diff := newDeadline.Sub(c.electionDeadline)
+	c.debugLog.Info("new election timeout", zap.Duration("diff", diff))  // seconds
+	if diff > 0 {
 		c.electionDeadline = newDeadline
 	}
 }

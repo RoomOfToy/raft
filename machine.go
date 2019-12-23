@@ -88,12 +88,16 @@ func (m *Machine) HandleMessage(msg Message) {
 	}
 	switch msg.(type) {
 	case AppendEntries:
+		Logger.Info("Handle message", zap.String("type", "AppendEntries"))
 		m.state.HandleAppendEntries(m, msg)
 	case AppendEntriesResponse:
+		Logger.Info("Handle message", zap.String("type", "AppendEntriesResponse"))
 		m.state.HandleAppendEntriesResponse(m, msg)
 	case RequestVote:
+		Logger.Info("Handle message", zap.String("type", "RequestVote"))
 		m.state.HandleRequestVote(m, msg)
 	case RequestVoteResponse:
+		Logger.Info("Handle message", zap.String("type", "HandleRequestVoteResponse"))
 		m.state.HandleRequestVoteResponse(m, msg)
 	}
 }
@@ -138,6 +142,23 @@ func HandleRequestVote(machine *Machine, msg Message) {
 	}
 }
 
+func HandleElectionTimeout(machine *Machine) {
+	Logger.Info("HandleElectionTimeout", zap.Int("server", machine.control.addr))
+	machine.state = Candidate{}
+	machine.term += 1
+	machine.votedFor = machine.control.addr // vote for itself
+	machine.control.ResetElectionTimer()
+	machine.votesGranted = 1
+
+	for _, dest := range machine.control.peers {
+		lastLogIdx, lastLogTerm := len(machine.log)-1, -1
+		if lastLogIdx != -1 {
+			lastLogTerm = machine.log[lastLogIdx].term
+		}
+		machine.control.SendMessage(NewRequestVote(machine.control.addr, dest, machine.term, lastLogIdx, lastLogTerm))
+	}
+}
+
 type Follower struct{}
 
 func (f Follower) HandleAppendEntries(machine *Machine, msg Message) {
@@ -170,23 +191,13 @@ func (f Follower) HandleAppendEntriesResponse(machine *Machine, msg Message) {}
 func (f Follower) HandleRequestVote(machine *Machine, msg Message) {
 	HandleRequestVote(machine, msg)
 }
+
 func (f Follower) HandleRequestVoteResponse(machine *Machine, msg Message) {}
 
 func (f Follower) HandleElectionTimeout(machine *Machine) {
-	machine.state = Candidate{}
-	machine.term += 1
-	machine.votedFor = machine.control.addr // vote for itself
-	machine.control.ResetElectionTimer()
-	machine.votesGranted = 1
-
-	for _, dest := range machine.control.peers {
-		lastLogIdx, lastLogTerm := len(machine.log)-1, -1
-		if lastLogIdx != -1 {
-			lastLogTerm = machine.log[lastLogIdx].term
-		}
-		machine.control.SendMessage(NewRequestVote(machine.control.addr, dest, machine.term, lastLogIdx, lastLogTerm))
-	}
+	HandleElectionTimeout(machine)
 }
+
 func (f Follower) HandleLeaderTimeout(machine *Machine) {}
 
 type Candidate struct{}
@@ -205,6 +216,7 @@ func (c Candidate) HandleAppendEntriesResponse(machine *Machine, msg Message) {}
 func (c Candidate) HandleRequestVote(machine *Machine, msg Message) {
 	HandleRequestVote(machine, msg)
 }
+
 func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
 	message := msg.(RequestVoteResponse)
 	if message.term < machine.term {
@@ -214,7 +226,7 @@ func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
 	if message.voteGranted == 1 {
 		machine.votesGranted += 1
 		if machine.votesGranted > machine.control.nservers / 2 {
-			Logger.Info("Machine become Leader", zap.Int("Addr", machine.control.addr))
+			Logger.Warn("Machine become Leader", zap.Int("Addr", machine.control.addr))
 			machine.state = Leader{}
 			machine.RestLeader()
 			// upon leadership change, send and empty AppendEntries
@@ -225,9 +237,9 @@ func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
 }
 
 func (c Candidate) HandleElectionTimeout(machine *Machine) {
-	f := Follower{}
-	f.HandleElectionTimeout(machine)
+	HandleElectionTimeout(machine)
 }
+
 func (c Candidate) HandleLeaderTimeout(machine *Machine) {}
 
 type Leader struct{}
@@ -259,9 +271,11 @@ func (l Leader) HandleAppendEntriesResponse(machine *Machine, msg Message) {
 func (l Leader) HandleRequestVote(machine *Machine, msg Message) {
 	HandleRequestVote(machine, msg)
 }
+
 func (l Leader) HandleRequestVoteResponse(machine *Machine, msg Message) {}
 
 func (l Leader) HandleElectionTimeout(machine *Machine) {}
+
 func (l Leader) HandleLeaderTimeout(machine *Machine) {
 	// must send and append entries message to all followers
 	machine.SendAppendEntries()

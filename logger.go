@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-var Logger = newLogger("info")
+var Logger = newLogger(LOGGER_LEVEL)
 
 func newLogger(level string) *zap.Logger {
 	encoderCfg := zap.NewProductionEncoderConfig()
