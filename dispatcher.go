@@ -32,7 +32,7 @@ func NewTransportDispatcher(addr int) *TransportDispatcher {
 }
 
 func (td *TransportDispatcher) SendMsg(msg Message) {
-	Logger.Warn("SendMsg", zap.Int("from", td.addr), zap.Any("to", msg.Dest()))
+	// Logger.Debug("SendMsg", zap.Int("from", td.addr), zap.Any("to", msg.Dest()))
 	td.sendQueues[msg.Dest()].PushBack(msg)
 }
 
@@ -46,7 +46,7 @@ func (td *TransportDispatcher) RecvMsg(addr int) Message {
 		Logger.Debug("TransportDispatcher RecvMsg error: recvQueue error", zap.Error(err))
 		return nil
 	}
-	Logger.Warn("RecvMsg", zap.Any("msg", msg))
+	// Logger.Debug("RecvMsg", zap.Any("msg", msg))
 	return msg.(Message)
 }
 
@@ -69,7 +69,7 @@ func (td *TransportDispatcher) raftReceiver(t *Transport) {
 			Logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
 			return
 		}
-		Logger.Warn("raftReceiver", zap.Int("server", td.addr), zap.Int("receive", len(data)), zap.Any("msg", msg))
+		// Logger.Debug("raftReceiver", zap.Int("server", td.addr), zap.Int("receive", len(data)), zap.Any("msg", msg))
 		if msg != nil {
 			td.recvQueue.PushBack(msg)
 		}
@@ -85,7 +85,7 @@ func (td *TransportDispatcher) raftSender(addr int) {
 		}
 		t := RunClient(RAFT_SERVER_CONFIG[addr])
 		bytes, err := Encode(msg.(Message))
-		Logger.Warn("raftSender", zap.Any("msg", msg), zap.Int("bytes", len(bytes)))
+		// Logger.Debug("raftSender", zap.Any("msg", msg), zap.Int("bytes", len(bytes)))
 		if err != nil {
 			Logger.Error("TransportDispatcher raftSender error: Encode error", zap.Error(err))
 			return
@@ -103,7 +103,7 @@ func (td *TransportDispatcher) Start() {
 	for i := 0; i < td.nservers; i++ {
 		if i != td.addr {
 			i := i
-			Logger.Warn("start TransportDispatcher", zap.Int("addr", td.addr), zap.Int("to", i))
+			// Logger.Debug("start TransportDispatcher", zap.Int("addr", td.addr), zap.Int("to", i))
 			go td.raftSender(i)
 		}
 	}

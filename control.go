@@ -72,8 +72,8 @@ func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, 
 		paused:     false,
 		debugLog:   Logger,
 
-		leaderDeadline:newDeadline(),
-		electionDeadline:newDeadline(),
+		leaderDeadline:   newDeadline(),
+		electionDeadline: newDeadline(),
 	}
 	machine.control = c
 	return c
@@ -118,17 +118,17 @@ func (c *Controller) run() {
 			case "HandleMessage":
 				// Logger.Warn("Event args", zap.Any("args", e.args))
 				if e.args != nil {
-					c.debugLog.Info("Event: HandleMessage", zap.Int("from", e.args.(Message).Source()), zap.Int("to", e.args.(Message).Dest()))
+					c.debugLog.Debug("Event: HandleMessage", zap.Int("from", e.args.(Message).Source()), zap.Int("to", e.args.(Message).Dest()))
 					c.machine.HandleMessage(e.args.(Message))
 				}
 			case "HandleLeaderTimeout":
-				c.debugLog.Info("Event: HandleLeaderTimeout", zap.Int("server", c.addr))
+				c.debugLog.Debug("Event: HandleLeaderTimeout", zap.Int("server", c.addr))
 				c.machine.HandleLeaderTimeout()
 			case "HandleElectionTimeout":
-				c.debugLog.Info("Event: HandleElectionTimout", zap.Int("server", c.addr))
+				c.debugLog.Debug("Event: HandleElectionTimout", zap.Int("server", c.addr))
 				c.machine.HandleElectionTimout()
 			case "AppendNewEntry":
-				c.debugLog.Info("Event: AppendNewEntry", zap.Int("server", c.addr))
+				c.debugLog.Debug("Event: AppendNewEntry", zap.Int("server", c.addr))
 				c.machine.AppendNewEntry(e.args.(LogEntry))
 			default:
 				c.debugLog.Panic("Event: Unsupported Event", zap.String("name", e.name))
@@ -171,10 +171,9 @@ func (c *Controller) runLeaderTimer() {
 }
 
 func (c *Controller) ResetLeaderTimeout() {
-	c.debugLog.Info("ResetLeaderTimeout", zap.Int("addr", c.addr))
+	c.debugLog.Debug("ResetLeaderTimeout", zap.Int("addr", c.addr))
 	c.leaderDeadline.set(time.Now().Add(LEADER_TIMEOUT))
 }
-
 
 func (c *Controller) runElectionTimer() {
 	c.electionDeadline.set(time.Now())
@@ -196,13 +195,13 @@ func (c *Controller) runElectionTimer() {
 func (c *Controller) newElectionDeadline() {
 	newDeadline := time.Now().Add(time.Duration(rand.Int63n(10)) * ELECTION_TIMEOUT_SPREAD).Add(ELECTION_TIMEOUT)
 	diff := newDeadline.Sub(c.electionDeadline.get())
-	c.debugLog.Info("new election timeout", zap.Duration("diff", diff))  // seconds
+	c.debugLog.Debug("new election timeout", zap.Duration("diff", diff)) // seconds
 	if diff > 0 {
 		c.electionDeadline.set(newDeadline)
 	}
 }
 
 func (c *Controller) ResetElectionTimer() {
-	c.debugLog.Info("ResetElectionTimer", zap.Int("addr", c.addr))
+	c.debugLog.Debug("ResetElectionTimer", zap.Int("addr", c.addr))
 	c.newElectionDeadline()
 }
