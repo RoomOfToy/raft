@@ -10,7 +10,7 @@ func TestServe(t *testing.T) {
 	controllers := make([]*Controller, NSERVERS)
 	ticker := time.NewTicker(15 * time.Second)
 	sTicker := time.NewTicker(60 * time.Second)
-	for k, _ := range RAFT_SERVER_CONFIG {
+	for k := range RAFT_SERVER_CONFIG {
 		controllers[k] = serve(k)
 		go controllers[k].Start()
 	}
@@ -24,7 +24,6 @@ Loop:
 		case <-sTicker.C:
 			ticker.Stop()
 			sTicker.Stop()
-		default:
 			break Loop
 		}
 	}
