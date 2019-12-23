@@ -1,6 +1,9 @@
 package raft
 
-import "go.uber.org/zap"
+import (
+	"go.uber.org/zap"
+	"io"
+)
 
 type Dispatcher interface {
 	SendMsg(msg Message)
@@ -29,6 +32,7 @@ func NewTransportDispatcher(addr int) *TransportDispatcher {
 }
 
 func (td *TransportDispatcher) SendMsg(msg Message) {
+	Logger.Warn("SendMsg", zap.Int("from", td.addr), zap.Any("to", msg.Dest()))
 	td.sendQueues[msg.Dest()].PushBack(msg)
 }
 
@@ -42,6 +46,7 @@ func (td *TransportDispatcher) RecvMsg(addr int) Message {
 		Logger.Debug("TransportDispatcher RecvMsg error: recvQueue error", zap.Error(err))
 		return nil
 	}
+	Logger.Warn("RecvMsg", zap.Any("msg", msg))
 	return msg.(Message)
 }
 
@@ -51,12 +56,23 @@ func (td *TransportDispatcher) RaftServer() {
 
 func (td *TransportDispatcher) raftReceiver(t *Transport) {
 	for {
-		msg, err := t.Read()
+		data, err := t.Read()
+		if err != nil && err != io.EOF {
+			Logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
+			return
+		}
+		if err == io.EOF {
+			return
+		}
+		msg, err := Decode(data)
 		if err != nil {
 			Logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
-			continue
+			return
 		}
-		td.recvQueue.PushBack(msg)
+		Logger.Warn("raftReceiver", zap.Int("server", td.addr), zap.Int("receive", len(data)), zap.Any("msg", msg))
+		if msg != nil {
+			td.recvQueue.PushBack(msg)
+		}
 	}
 }
 
@@ -65,10 +81,11 @@ func (td *TransportDispatcher) raftSender(addr int) {
 		msg, err := td.sendQueues[addr].PopFront()
 		if err != nil {
 			Logger.Debug("TransportDispatcher raftSender error: Deque error", zap.Error(err))
-			return
+			continue
 		}
 		t := RunClient(RAFT_SERVER_CONFIG[addr])
-		bytes, err := msg.(Message).Encode()
+		bytes, err := Encode(msg.(Message))
+		Logger.Warn("raftSender", zap.Any("msg", msg), zap.Int("bytes", len(bytes)))
 		if err != nil {
 			Logger.Error("TransportDispatcher raftSender error: Encode error", zap.Error(err))
 			return
@@ -86,6 +103,7 @@ func (td *TransportDispatcher) Start() {
 	for i := 0; i < td.nservers; i++ {
 		if i != td.addr {
 			i := i
+			Logger.Warn("start TransportDispatcher", zap.Int("addr", td.addr), zap.Int("to", i))
 			go td.raftSender(i)
 		}
 	}

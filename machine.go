@@ -13,14 +13,14 @@ type State interface {
 }
 
 type LogEntry struct {
-	term  int
-	entry interface{}
+	Tm    int
+	Entry interface{}
 }
 
 func NewLogEntry(term int, entry interface{}) LogEntry {
 	return LogEntry{
-		term:  term,
-		entry: entry,
+		Tm:    term,
+		Entry: entry,
 	}
 }
 
@@ -62,10 +62,10 @@ func (m *Machine) AppendEntries(prevIdx, prevTerm int, entries []LogEntry) bool 
 		return false
 	}
 
-	if prevIdx >= 0 && m.log[prevIdx].term != prevTerm {
+	if prevIdx >= 0 && m.log[prevIdx].Tm != prevTerm {
 		return false
 	}
-	m.log = append(m.log[prevIdx+1:], entries...)
+	m.log = append(m.log[:prevIdx+1], entries...)
 	return true
 }
 
@@ -91,14 +91,18 @@ func (m *Machine) HandleMessage(msg Message) {
 		Logger.Info("Handle message", zap.String("type", "AppendEntries"))
 		m.state.HandleAppendEntries(m, msg)
 	case AppendEntriesResponse:
-		Logger.Info("Handle message", zap.String("type", "AppendEntriesResponse"))
-		m.state.HandleAppendEntriesResponse(m, msg)
+		if msg.Term() == m.term {
+			Logger.Info("Handle message", zap.String("type", "AppendEntriesResponse"))
+			m.state.HandleAppendEntriesResponse(m, msg)
+		}
 	case RequestVote:
 		Logger.Info("Handle message", zap.String("type", "RequestVote"))
 		m.state.HandleRequestVote(m, msg)
 	case RequestVoteResponse:
-		Logger.Info("Handle message", zap.String("type", "HandleRequestVoteResponse"))
-		m.state.HandleRequestVoteResponse(m, msg)
+		if msg.Term() == m.term {
+			Logger.Info("Handle message", zap.String("type", "HandleRequestVoteResponse"))
+			m.state.HandleRequestVoteResponse(m, msg)
+		}
 	}
 }
 
@@ -126,12 +130,13 @@ func (m *Machine) SendAppendEntries() {
 func (m *Machine) SendAppendEntry(dest int) {
 	prevLogIdx, prevLogTerm := m.nextIdx[dest]-1, -1
 	if prevLogIdx >= 0 {
-		prevLogTerm = m.log[prevLogIdx].term
+		prevLogTerm = m.log[prevLogIdx].Tm
 	}
 	m.control.SendMessage(NewAppendEntries(m.control.addr, dest, m.term, prevLogIdx, prevLogTerm, m.log[prevLogIdx+1:], m.commitIdx))
 }
 
 func HandleRequestVote(machine *Machine, msg Message) {
+	Logger.Info("RequestVote", zap.Int("from", machine.control.addr), zap.Int("to", msg.Source()))
 	if msg.Term() < machine.term ||
 		(msg.Term() == machine.term && machine.votedFor != -1 && machine.votedFor != msg.Source()) {
 		machine.control.SendMessage(NewRequestVoteResponse(machine.control.addr, msg.Source(), machine.term, 0))
@@ -153,7 +158,7 @@ func HandleElectionTimeout(machine *Machine) {
 	for _, dest := range machine.control.peers {
 		lastLogIdx, lastLogTerm := len(machine.log)-1, -1
 		if lastLogIdx != -1 {
-			lastLogTerm = machine.log[lastLogIdx].term
+			lastLogTerm = machine.log[lastLogIdx].Tm
 		}
 		machine.control.SendMessage(NewRequestVote(machine.control.addr, dest, machine.term, lastLogIdx, lastLogTerm))
 	}
@@ -164,20 +169,21 @@ type Follower struct{}
 func (f Follower) HandleAppendEntries(machine *Machine, msg Message) {
 	machine.votedFor = -1
 	message := msg.(AppendEntries)
-	logOk := message.prevLogIdx == -1 ||
-		(message.prevLogIdx >= 0 && message.prevLogIdx < len(machine.log) &&
-			message.prevLogTerm == machine.log[message.prevLogIdx].term)
-	if message.term < machine.term || !logOk {
+	logOk := message.PrevLogIdx == -1 ||
+		(message.PrevLogIdx >= 0 && message.PrevLogIdx < len(machine.log) &&
+			message.PrevLogTm == machine.log[message.PrevLogIdx].Tm)
+	if message.Tm < machine.term || !logOk {
 		// failure
-		machine.control.SendMessage(NewAppendEntriesResponse(machine.control.addr, message.source, machine.term, false, -1))
+		machine.control.SendMessage(NewAppendEntriesResponse(machine.control.addr, message.Src, machine.term, false, -1))
 	} else {
 		// appending should work
-		ok := machine.AppendEntries(message.prevLogIdx, message.prevLogTerm, message.entries)
+		ok := machine.AppendEntries(message.PrevLogIdx, message.PrevLogTm, message.Entries)
 		if !ok {
 			Logger.Panic("Follower HandleAppendEntries Failure")
+			return
 		}
-		machine.control.SendMessage(NewAppendEntriesResponse(machine.control.addr, message.source, machine.term, true, message.prevLogIdx+len(message.entries)))
-		machine.commitIdx = message.leaderCommit
+		machine.control.SendMessage(NewAppendEntriesResponse(machine.control.addr, message.Src, machine.term, true, message.PrevLogIdx+len(message.Entries)))
+		machine.commitIdx = message.LeaderCommit
 		if machine.lastApplied < machine.commitIdx {
 			machine.control.ApplyEntries(machine.log[machine.lastApplied+1 : machine.commitIdx+1])
 			machine.lastApplied = machine.commitIdx
@@ -204,10 +210,10 @@ type Candidate struct{}
 
 func (c Candidate) HandleAppendEntries(machine *Machine, msg Message) {
 	message := msg.(AppendEntries)
-	if message.term == machine.term {
+	if message.Tm == machine.term {
 		// convert to follower and handle message
 		machine.state = Follower{}
-		machine.HandleMessage(msg)
+		machine.state.HandleAppendEntries(machine, msg)
 	}
 }
 
@@ -218,12 +224,13 @@ func (c Candidate) HandleRequestVote(machine *Machine, msg Message) {
 }
 
 func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
+	Logger.Info("RequestVoteResponse", zap.Int("from", msg.Source()), zap.Int("to", machine.control.addr))
 	message := msg.(RequestVoteResponse)
-	if message.term < machine.term {
+	if message.Tm < machine.term {
 		// ignore out of date message
 	}
 
-	if message.voteGranted == 1 {
+	if message.VoteGranted == 1 {
 		machine.votesGranted += 1
 		if machine.votesGranted > machine.control.nservers / 2 {
 			Logger.Warn("Machine become Leader", zap.Int("Addr", machine.control.addr))
@@ -249,9 +256,9 @@ func (l Leader) HandleAppendEntries(machine *Machine, msg Message) {}
 func (l Leader) HandleAppendEntriesResponse(machine *Machine, msg Message) {
 	// if the operation was successful, update leader settings for the follower
 	message := msg.(AppendEntriesResponse)
-	if message.success {
-		machine.matchIdx[message.source] = message.matchIdx
-		machine.nextIdx[message.source] = message.matchIdx+1
+	if message.Success {
+		machine.matchIdx[message.Src] = message.MatchIdx
+		machine.nextIdx[message.Src] = message.MatchIdx +1
 
 		// check for consensus on log entries
 		matches := sortMapByValue(machine.matchIdx)
@@ -263,8 +270,8 @@ func (l Leader) HandleAppendEntriesResponse(machine *Machine, msg Message) {
 	} else {
 		// it failed for this follower
 		// immediately retry with a lower nextIdx value
-		machine.nextIdx[message.source] -= 1
-		machine.SendAppendEntry(message.source)
+		machine.nextIdx[message.Src] -= 1
+		machine.SendAppendEntry(message.Src)
 	}
 }
 

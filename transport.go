@@ -73,5 +73,5 @@ func RunClient(serverAddr string) *Transport {
 		Logger.Error("Connect error", zap.String("addr", serverAddr), zap.String("err", err.Error()))
 		return nil
 	}
-	return &Transport{conn: conn}
+	return NewTransport(conn)
 }

@@ -4,7 +4,7 @@ import "time"
 
 var (
 	NSERVERS = 5
-	LOGGER_LEVEL = "info"
+	LOGGER_LEVEL = "warn"
 
 	LEADER_TIMEOUT = 1 * time.Second
 	ELECTION_TIMEOUT = 3 * time.Second

@@ -3,6 +3,7 @@ package raft
 import (
 	"go.uber.org/zap"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -24,8 +25,32 @@ type Controller struct {
 
 	debugLog *zap.Logger
 
-	leaderDeadline   time.Time
-	electionDeadline time.Time
+	leaderDeadline   *deadline
+	electionDeadline *deadline
+}
+
+type deadline struct {
+	lock sync.RWMutex
+	t    time.Time
+}
+
+func newDeadline() *deadline {
+	return &deadline{
+		lock: sync.RWMutex{},
+		t:    time.Now(),
+	}
+}
+
+func (dl *deadline) get() time.Time {
+	dl.lock.RLock()
+	defer dl.lock.RUnlock()
+	return dl.t
+}
+
+func (dl *deadline) set(t time.Time) {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+	dl.t = t
 }
 
 func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, applicator ControllerBase) *Controller {
@@ -46,13 +71,16 @@ func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, 
 		running:    false,
 		paused:     false,
 		debugLog:   Logger,
+
+		leaderDeadline:newDeadline(),
+		electionDeadline:newDeadline(),
 	}
 	machine.control = c
 	return c
 }
 
 func (c *Controller) SendMessage(msg Message) {
-	c.debugLog.Info("SendMessage", zap.Int("from", c.addr), zap.Int("to", msg.Dest()))
+	// c.debugLog.Info("SendMessage", zap.Int("from", c.addr), zap.Int("to", msg.Dest()))
 	c.dispatcher.SendMsg(msg)
 }
 
@@ -85,8 +113,10 @@ func (c *Controller) run() {
 		}
 		if !c.paused && evt != nil {
 			e := evt.(event)
+			// Logger.Warn("Event", zap.String("name", e.name))
 			switch e.name {
 			case "HandleMessage":
+				// Logger.Warn("Event args", zap.Any("args", e.args))
 				if e.args != nil {
 					c.debugLog.Info("Event: HandleMessage", zap.Int("from", e.args.(Message).Source()), zap.Int("to", e.args.(Message).Dest()))
 					c.machine.HandleMessage(e.args.(Message))
@@ -107,6 +137,14 @@ func (c *Controller) run() {
 	}
 }
 
+func (c *Controller) pause() {
+	c.paused = true
+}
+
+func (c *Controller) resume() {
+	c.paused = false
+}
+
 func (c *Controller) runReceiver() {
 	for c.running {
 		msg := c.dispatcher.RecvMsg(c.addr)
@@ -115,15 +153,15 @@ func (c *Controller) runReceiver() {
 }
 
 func (c *Controller) runLeaderTimer() {
-	c.leaderDeadline = time.Now()
+	c.leaderDeadline.set(time.Now())
 	for c.running {
-		delay := c.leaderDeadline.Sub(time.Now())
+		delay := c.leaderDeadline.get().Sub(time.Now())
 		if delay <= 0 {
 			delay = LEADER_TIMEOUT
-			c.leaderDeadline = time.Now().Add(delay)
+			c.leaderDeadline.set(time.Now().Add(delay))
 		}
 		time.Sleep(delay)
-		if time.Now().After(c.leaderDeadline) {
+		if time.Now().After(c.leaderDeadline.get()) {
 			c.eventQueue.PushBack(event{
 				name: "HandleLeaderTimeout",
 				args: nil,
@@ -134,18 +172,19 @@ func (c *Controller) runLeaderTimer() {
 
 func (c *Controller) ResetLeaderTimeout() {
 	c.debugLog.Info("ResetLeaderTimeout", zap.Int("addr", c.addr))
-	c.leaderDeadline = time.Now().Add(LEADER_TIMEOUT)
+	c.leaderDeadline.set(time.Now().Add(LEADER_TIMEOUT))
 }
 
+
 func (c *Controller) runElectionTimer() {
-	c.electionDeadline = time.Now()
+	c.electionDeadline.set(time.Now())
 	for c.running {
-		delay := c.electionDeadline.Sub(time.Now())
+		delay := c.electionDeadline.get().Sub(time.Now())
 		if delay <= 0 {
 			c.newElectionDeadline()
 		}
-		time.Sleep(c.electionDeadline.Sub(time.Now()))
-		if time.Now().After(c.electionDeadline) {
+		time.Sleep(c.electionDeadline.get().Sub(time.Now()))
+		if time.Now().After(c.electionDeadline.get()) {
 			c.eventQueue.PushBack(event{
 				name: "HandleElectionTimeout",
 				args: nil,
@@ -156,10 +195,10 @@ func (c *Controller) runElectionTimer() {
 
 func (c *Controller) newElectionDeadline() {
 	newDeadline := time.Now().Add(time.Duration(rand.Int63n(10)) * ELECTION_TIMEOUT_SPREAD).Add(ELECTION_TIMEOUT)
-	diff := newDeadline.Sub(c.electionDeadline)
+	diff := newDeadline.Sub(c.electionDeadline.get())
 	c.debugLog.Info("new election timeout", zap.Duration("diff", diff))  // seconds
 	if diff > 0 {
-		c.electionDeadline = newDeadline
+		c.electionDeadline.set(newDeadline)
 	}
 }
 
