@@ -3,20 +3,17 @@ package raft
 import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
+	"log"
 )
 
-var Logger = newLogger(LOGGER_LEVEL)
+// var Logger = newLogger(LOGGER_LEVEL, "")
 
-func newLogger(level string) *zap.Logger {
-	encoderCfg := zap.NewProductionEncoderConfig()
-	atom := zap.NewAtomicLevel()
-	logger := zap.New(zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderCfg),
-		zapcore.Lock(os.Stdout),
-		atom,
-	))
-	defer logger.Sync()
+func newLogger(level string, filePath string) *zap.Logger {
+	cfg := zap.NewProductionConfig()
+	if filePath == "" {
+		filePath = "stdout"
+	}
+	cfg.OutputPaths = []string{filePath}
 	var l zapcore.Level
 	switch level {
 	case "debug":
@@ -33,8 +30,12 @@ func newLogger(level string) *zap.Logger {
 		l = zap.PanicLevel
 	default:
 		l = zap.DebugLevel
-		logger.Warn("Log level '" + level + "' not recognized. Default set to Debug")
+		log.Println("Log level '" + level + "' not recognized. Default set to Debug")
 	}
-	atom.SetLevel(l)
+	cfg.Level = zap.NewAtomicLevelAt(l)
+	logger, err := cfg.Build()
+	if err != nil {
+		log.Panicf("Error when build logger: %s", err.Error())
+	}
 	return logger
 }

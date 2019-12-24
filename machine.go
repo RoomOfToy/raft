@@ -38,9 +38,11 @@ type Machine struct {
 
 	nextIdx  map[int]int
 	matchIdx map[int]int
+
+	logger *zap.Logger
 }
 
-func NewMachine() *Machine {
+func NewMachine(logger *zap.Logger) *Machine {
 	return &Machine{
 		control:      nil,
 		term:         0,
@@ -50,6 +52,8 @@ func NewMachine() *Machine {
 		log:          []LogEntry{},
 		commitIdx:    -1,
 		lastApplied:  -1,
+
+		logger: logger,
 	}
 }
 
@@ -88,19 +92,19 @@ func (m *Machine) HandleMessage(msg Message) {
 	}
 	switch msg.(type) {
 	case AppendEntries:
-		Logger.Info("Handle message", zap.String("type", "AppendEntries"))
+		m.logger.Info("Handle message", zap.String("type", "AppendEntries"))
 		m.state.HandleAppendEntries(m, msg)
 	case AppendEntriesResponse:
 		if msg.Term() == m.term {
-			Logger.Info("Handle message", zap.String("type", "AppendEntriesResponse"))
+			m.logger.Info("Handle message", zap.String("type", "AppendEntriesResponse"))
 			m.state.HandleAppendEntriesResponse(m, msg)
 		}
 	case RequestVote:
-		Logger.Info("Handle message", zap.String("type", "RequestVote"))
+		m.logger.Info("Handle message", zap.String("type", "RequestVote"))
 		m.state.HandleRequestVote(m, msg)
 	case RequestVoteResponse:
 		if msg.Term() == m.term {
-			Logger.Info("Handle message", zap.String("type", "HandleRequestVoteResponse"))
+			m.logger.Info("Handle message", zap.String("type", "HandleRequestVoteResponse"))
 			m.state.HandleRequestVoteResponse(m, msg)
 		}
 	}
@@ -136,7 +140,7 @@ func (m *Machine) SendAppendEntry(dest int) {
 }
 
 func HandleRequestVote(machine *Machine, msg Message) {
-	Logger.Info("RequestVote", zap.Int("from", machine.control.addr), zap.Int("to", msg.Source()))
+	machine.logger.Info("RequestVote", zap.Int("from", machine.control.addr), zap.Int("to", msg.Source()))
 	if msg.Term() < machine.term ||
 		(msg.Term() == machine.term && machine.votedFor != -1 && machine.votedFor != msg.Source()) {
 		machine.control.SendMessage(NewRequestVoteResponse(machine.control.addr, msg.Source(), machine.term, 0))
@@ -148,7 +152,7 @@ func HandleRequestVote(machine *Machine, msg Message) {
 }
 
 func HandleElectionTimeout(machine *Machine) {
-	Logger.Info("HandleElectionTimeout", zap.Int("server", machine.control.addr))
+	machine.logger.Info("HandleElectionTimeout", zap.Int("server", machine.control.addr))
 	machine.state = Candidate{}
 	machine.term += 1
 	machine.votedFor = machine.control.addr // vote for itself
@@ -179,7 +183,7 @@ func (f Follower) HandleAppendEntries(machine *Machine, msg Message) {
 		// appending should work
 		ok := machine.AppendEntries(message.PrevLogIdx, message.PrevLogTm, message.Entries)
 		if !ok {
-			Logger.Panic("Follower HandleAppendEntries Failure")
+			machine.logger.Panic("Follower HandleAppendEntries Failure")
 			return
 		}
 		machine.control.SendMessage(NewAppendEntriesResponse(machine.control.addr, message.Src, machine.term, true, message.PrevLogIdx+len(message.Entries)))
@@ -224,7 +228,7 @@ func (c Candidate) HandleRequestVote(machine *Machine, msg Message) {
 }
 
 func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
-	Logger.Info("RequestVoteResponse", zap.Int("from", msg.Source()), zap.Int("to", machine.control.addr))
+	machine.logger.Info("RequestVoteResponse", zap.Int("from", msg.Source()), zap.Int("to", machine.control.addr))
 	message := msg.(RequestVoteResponse)
 	if message.Tm < machine.term {
 		// ignore out of date message
@@ -232,8 +236,8 @@ func (c Candidate) HandleRequestVoteResponse(machine *Machine, msg Message) {
 
 	if message.VoteGranted == 1 {
 		machine.votesGranted += 1
-		if machine.votesGranted > machine.control.nservers / 2 {
-			Logger.Warn("Machine become Leader", zap.Int("Addr", machine.control.addr))
+		if machine.votesGranted > machine.control.nservers/2 {
+			machine.logger.Warn("Machine become Leader", zap.Int("Addr", machine.control.addr))
 			machine.state = Leader{}
 			machine.RestLeader()
 			// upon leadership change, send and empty AppendEntries
@@ -258,13 +262,13 @@ func (l Leader) HandleAppendEntriesResponse(machine *Machine, msg Message) {
 	message := msg.(AppendEntriesResponse)
 	if message.Success {
 		machine.matchIdx[message.Src] = message.MatchIdx
-		machine.nextIdx[message.Src] = message.MatchIdx +1
+		machine.nextIdx[message.Src] = message.MatchIdx + 1
 
 		// check for consensus on log entries
 		matches := sortMapByValue(machine.matchIdx)
-		machine.commitIdx = matches[len(machine.matchIdx) / 2].value
+		machine.commitIdx = matches[len(machine.matchIdx)/2].value
 		if machine.lastApplied < machine.commitIdx {
-			machine.control.ApplyEntries(machine.log[machine.lastApplied+1:machine.commitIdx+1])
+			machine.control.ApplyEntries(machine.log[machine.lastApplied+1 : machine.commitIdx+1])
 			machine.lastApplied = machine.commitIdx
 		}
 	} else {
@@ -289,4 +293,3 @@ func (l Leader) HandleLeaderTimeout(machine *Machine) {
 	// must reset the leader timeout
 	machine.control.ResetLeaderTimeout()
 }
-

@@ -15,9 +15,11 @@ type TransportDispatcher struct {
 	nservers   int
 	recvQueue  *DequeRW
 	sendQueues []*DequeRW
+
+	logger *zap.Logger
 }
 
-func NewTransportDispatcher(addr int) *TransportDispatcher {
+func NewTransportDispatcher(addr int, logger *zap.Logger) *TransportDispatcher {
 	nservers := len(RAFT_SERVER_CONFIG)
 	sendQueues := make([]*DequeRW, nservers)
 	for i := range sendQueues {
@@ -28,6 +30,8 @@ func NewTransportDispatcher(addr int) *TransportDispatcher {
 		nservers:   nservers,
 		recvQueue:  NewDequeRW(8),
 		sendQueues: sendQueues,
+
+		logger: logger,
 	}
 }
 
@@ -38,12 +42,12 @@ func (td *TransportDispatcher) SendMsg(msg Message) {
 
 func (td *TransportDispatcher) RecvMsg(addr int) Message {
 	if addr != td.addr {
-		Logger.Error("TransportDispatcher RecvMsg error: wrong addr", zap.Int("addr", addr))
+		td.logger.Error("TransportDispatcher RecvMsg error: wrong addr", zap.Int("addr", addr))
 		return nil
 	}
 	msg, err := td.recvQueue.PopFront()
 	if err != nil {
-		Logger.Debug("TransportDispatcher RecvMsg error: recvQueue error", zap.Error(err))
+		td.logger.Debug("TransportDispatcher RecvMsg error: recvQueue error", zap.Error(err))
 		return nil
 	}
 	// Logger.Debug("RecvMsg", zap.Any("msg", msg))
@@ -51,14 +55,14 @@ func (td *TransportDispatcher) RecvMsg(addr int) Message {
 }
 
 func (td *TransportDispatcher) RaftServer() {
-	go RunServer(RAFT_SERVER_CONFIG[td.addr], td.raftReceiver)
+	go RunServer(RAFT_SERVER_CONFIG[td.addr], td.logger, td.raftReceiver)
 }
 
 func (td *TransportDispatcher) raftReceiver(t *Transport) {
 	for {
 		data, err := t.Read()
 		if err != nil && err != io.EOF {
-			Logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
+			td.logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
 			return
 		}
 		if err == io.EOF {
@@ -66,7 +70,7 @@ func (td *TransportDispatcher) raftReceiver(t *Transport) {
 		}
 		msg, err := Decode(data)
 		if err != nil {
-			Logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
+			td.logger.Error("TransportDispatcher RaftServer error: raftReceiver error", zap.Error(err))
 			return
 		}
 		// Logger.Debug("raftReceiver", zap.Int("server", td.addr), zap.Int("receive", len(data)), zap.Any("msg", msg))
@@ -80,19 +84,19 @@ func (td *TransportDispatcher) raftSender(addr int) {
 	for {
 		msg, err := td.sendQueues[addr].PopFront()
 		if err != nil {
-			Logger.Debug("TransportDispatcher raftSender error: Deque error", zap.Error(err))
+			td.logger.Debug("TransportDispatcher raftSender error: Deque error", zap.Error(err))
 			continue
 		}
-		t := RunClient(RAFT_SERVER_CONFIG[addr])
+		t := RunClient(RAFT_SERVER_CONFIG[addr], td.logger)
 		bytes, err := Encode(msg.(Message))
 		// Logger.Debug("raftSender", zap.Any("msg", msg), zap.Int("bytes", len(bytes)))
 		if err != nil {
-			Logger.Error("TransportDispatcher raftSender error: Encode error", zap.Error(err))
+			td.logger.Error("TransportDispatcher raftSender error: Encode error", zap.Error(err))
 			return
 		}
 		err = t.Send(bytes)
 		if err != nil {
-			Logger.Error("TransportDispatcher raftSender error: Send error", zap.Error(err))
+			td.logger.Error("TransportDispatcher raftSender error: Send error", zap.Error(err))
 			return
 		}
 	}

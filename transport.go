@@ -49,17 +49,17 @@ func (t *Transport) Read() ([]byte, error) {
 	return msg, nil
 }
 
-func RunServer(addr string, handler func(t *Transport)) {
+func RunServer(addr string, logger *zap.Logger, handler func(t *Transport)) {
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
-		Logger.Error("Listen error", zap.String("addr", addr), zap.String("err", err.Error()))
+		logger.Error("Listen error", zap.String("addr", addr), zap.String("err", err.Error()))
 		return
 	}
 
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			Logger.Error("Accept error", zap.String("err", err.Error()))
+			logger.Error("Accept error", zap.String("err", err.Error()))
 			continue
 		}
 		t := Transport{conn: conn}
@@ -67,10 +67,10 @@ func RunServer(addr string, handler func(t *Transport)) {
 	}
 }
 
-func RunClient(serverAddr string) *Transport {
+func RunClient(serverAddr string, logger *zap.Logger) *Transport {
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
-		Logger.Error("Connect error", zap.String("addr", serverAddr), zap.String("err", err.Error()))
+		logger.Error("Connect error", zap.String("addr", serverAddr), zap.String("err", err.Error()))
 		return nil
 	}
 	return NewTransport(conn)

@@ -53,7 +53,7 @@ func (dl *deadline) set(t time.Time) {
 	dl.t = t
 }
 
-func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, applicator ControllerBase) *Controller {
+func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, applicator ControllerBase, logger *zap.Logger) *Controller {
 	peers := make([]int, 0, dispatcher.nservers)
 	for i := 0; i < dispatcher.nservers; i++ {
 		if i != addr {
@@ -70,7 +70,7 @@ func NewController(addr int, dispatcher *TransportDispatcher, machine *Machine, 
 		eventQueue: NewDequeRW(8),
 		running:    false,
 		paused:     false,
-		debugLog:   Logger,
+		debugLog:   logger,
 
 		leaderDeadline:   newDeadline(),
 		electionDeadline: newDeadline(),
