@@ -1,6 +1,9 @@
 package raft
 
-import "go.uber.org/zap"
+import (
+	"fmt"
+	"go.uber.org/zap"
+)
 
 type State interface {
 	HandleAppendEntries(machine *Machine, msg Message)
@@ -15,6 +18,10 @@ type State interface {
 type LogEntry struct {
 	Tm    int
 	Entry interface{}
+}
+
+func (le LogEntry) String() string {
+	return fmt.Sprintf("LogEntry{ Tm: %d, Entry: %+v }", le.Tm, le.Entry)
 }
 
 func NewLogEntry(term int, entry interface{}) LogEntry {
@@ -121,6 +128,7 @@ func (m *Machine) HandleLeaderTimeout() {
 func (m *Machine) AppendNewEntry(entry interface{}) {
 	e := NewLogEntry(m.term, entry)
 	m.log = append(m.log, e)
+	m.logger.Info("AppendNewEntry", zap.String("entry", e.String()))
 	m.SendAppendEntries()
 	m.control.ResetLeaderTimeout()
 }

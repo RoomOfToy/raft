@@ -129,7 +129,7 @@ func (c *Controller) run() {
 				c.machine.HandleElectionTimout()
 			case "AppendNewEntry":
 				c.debugLog.Debug("Event: AppendNewEntry", zap.Int("server", c.addr))
-				c.machine.AppendNewEntry(e.args.(LogEntry))
+				c.machine.AppendNewEntry(e.args)
 			default:
 				c.debugLog.Panic("Event: Unsupported Event", zap.String("name", e.name))
 			}
@@ -204,4 +204,11 @@ func (c *Controller) newElectionDeadline() {
 func (c *Controller) ResetElectionTimer() {
 	c.debugLog.Debug("ResetElectionTimer", zap.Int("addr", c.addr))
 	c.newElectionDeadline()
+}
+
+func (c *Controller) ApplyEntry(item interface{}) {
+	c.eventQueue.PushBack(event{
+		name: "AppendNewEntry",
+		args: item,
+	})
 }
